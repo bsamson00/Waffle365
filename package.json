@@ -10,16 +10,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bsamson00/365Launcher.git"
+    "url": "git+https://github.com/bsamson00/Waffle365.git"
   },
   "keywords": [],
   "author": "",
   "license": "MPL-2.0",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/bsamson00/365Launcher/issues"
+    "url": "https://github.com/bsamson00/Waffle365/issues"
   },
-  "homepage": "https://github.com/bsamson00/365Launcher#readme",
+  "homepage": "https://github.com/bsamson00/Waffle365#readme",
   "devDependencies": {
     "tailwindcss": "^3.4.17"
   }
