@@ -791,23 +791,8 @@ function matchPattern(pattern, url, alternativeLinks = []) {
 function showAboutModal() {
   const aboutIcon = document.getElementById('about-icon');
   const aboutModal = createModalController('about-modal');
-  const logoDark = document.getElementById('logo-dark');
-  const logoLight = document.getElementById('logo-light');
-
-  const updateLogos = () => {
-    const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-
-    if (currentTheme === 'dark') {
-      logoDark.classList.add('hidden');
-      logoLight.classList.remove('hidden');
-    } else {
-      logoDark.classList.remove('hidden');
-      logoLight.classList.add('hidden');
-    }
-  };
 
   aboutIcon.addEventListener('click', () => {
-    updateLogos();
     aboutModal.openModal(aboutIcon);
   });
 }
@@ -819,7 +804,7 @@ document.querySelectorAll('.share-btn').forEach(btn => {
     e.preventDefault();
     const platform = this.getAttribute('data-platform');
     const url = encodeURIComponent(window.location.href);
-    const text = encodeURIComponent("Check out 365 Launcher - a great productivity tool!");
+    const text = encodeURIComponent("Check out Waffle365 - a great productivity tool!");
     
     let shareUrl;
     switch(platform) {

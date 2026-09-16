@@ -1,4 +1,4 @@
-# 365 Launcher
+# Waffle365
 
 A lightweight, compact, launcher for Microsoft 365 apps and admin portals. Features different tab modes to minimise open tabs.
 
@@ -17,7 +17,7 @@ A lightweight, compact, launcher for Microsoft 365 apps and admin portals. Featu
 
 ## Usage
 
-- Click on the 365 Launcher icon in the Chrome toolbar.
+- Click on the Waffle365 icon in the Chrome toolbar.
 - Use the **Apps/Admin** toggle to switch between app shortcuts and admin portals.
 - The launcher is responsive and adapts to your current browser theme (light or dark mode).
 
@@ -67,4 +67,4 @@ This project is licensed under the Mozilla Public License (MPL), v. 2.0
 
 ## Acknowledgments
 
-None.
+Based on [365 Launcher](https://github.com/cloudhal/365Launcher) by Cloudrun Ltd, used under the Mozilla Public License 2.0.
