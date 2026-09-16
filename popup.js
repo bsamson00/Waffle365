@@ -107,6 +107,8 @@ fetch(chrome.runtime.getURL("changelog.json"))
 // Debug mode
 let debugMode;
 let activeSearchText = '';
+let hiddenIcons = new Set(); // IDs of icons the user has hidden, e.g. "apps:Word"
+let iconOrder = []; // Icon IDs in the user's chosen order; icons not listed fall back to A-Z at the end
 
 function setResolvedTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
@@ -344,17 +346,102 @@ function logEvent(keyOrMessage, message) {
 document.addEventListener('DOMContentLoaded', () => {
   togglePages(); // Toggle between apps and admin pages
   setupSearchFilter();
-  renderFilteredPages();
+  chrome.storage.sync.get({ hiddenIcons: [], iconOrder: [] }, data => {
+    hiddenIcons = new Set(data.hiddenIcons);
+    iconOrder = data.iconOrder;
+    renderFilteredPages();
+  });
   focusSearchInput();
   showAboutModal();
   showSettingsModal();
   setupKeyboardShortcuts();
   setupStatusBar();
+  setupIconArranging();
 });
+
+// Hold Cmd (Mac) / Windows key and drag a tile to rearrange icons on the current page. Order syncs via chrome.storage.sync.
+function setupIconArranging() {
+  const pages = [
+    { page: document.getElementById('apps-page'), iconSet: appIcons },
+    { page: document.getElementById('admin-page'), iconSet: adminIcons }
+  ];
+  let drag = null;
+  let suppressClick = false;
+
+  document.addEventListener('mousedown', event => {
+    const tile = event.target.closest('.app-icon');
+    if (!event.metaKey || event.button !== 0 || !tile) return;
+    event.preventDefault(); // Stop the browser's native link drag
+    const { page, iconSet } = pages.find(entry => entry.page.contains(tile));
+    drag = { tile, page, iconSet, startX: event.clientX, startY: event.clientY, moved: false };
+  });
+
+  document.addEventListener('mousemove', event => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return; // Ignore tiny moves so Cmd+click still works
+      drag.moved = true;
+      drag.tile.classList.add('opacity-50');
+    }
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.app-icon');
+    if (!target || target === drag.tile || !drag.page.contains(target)) return;
+    const tiles = [...drag.page.querySelectorAll('.app-icon')];
+    const movingForward = tiles.indexOf(drag.tile) < tiles.indexOf(target);
+    drag.page.insertBefore(drag.tile, movingForward ? target.nextSibling : target);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!drag) return;
+    const { tile, page, iconSet, moved } = drag;
+    drag = null;
+    if (!moved) return;
+    tile.classList.remove('opacity-50');
+    suppressClick = true; // Don't launch the app when the drag ends on a tile
+    setTimeout(() => { suppressClick = false; }, 0);
+    saveGridOrder(page, iconSet);
+  });
+
+  document.addEventListener('click', event => {
+    if (!suppressClick) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+}
+
+// Merge the dragged tiles' order into the full saved order, keeping hidden and search-filtered icons in their slots
+function saveGridOrder(page, iconSet) {
+  const tileIds = [...page.querySelectorAll('.app-icon')].map(tile => tile.dataset.iconId);
+  const shownIds = new Set(tileIds);
+  let nextTile = 0;
+  const pageOrder = sortIcons(iconSet)
+    .map(icon => getIconId(icon, iconSet))
+    .map(id => shownIds.has(id) ? tileIds[nextTile++] : id);
+
+  const otherSet = iconSet === appIcons ? adminIcons : appIcons;
+  const otherOrder = sortIcons(otherSet).map(icon => getIconId(icon, otherSet));
+
+  iconOrder = [...pageOrder, ...otherOrder];
+  chrome.storage.sync.set({ iconOrder }, () => logEvent("iconOrder", iconOrder));
+}
+
+// Unique per page, since some names (Fabric, Teams, etc.) appear in both apps and admin
+function getIconId(icon, iconSet) {
+    return `${iconSet === adminIcons ? 'admin' : 'apps'}:${icon.text}`;
+}
+
+// Sort by the user's saved order; unordered icons (e.g. newly added ones) go last, A-Z
+function sortIcons(iconSet, order = iconOrder) {
+    const position = icon => {
+      const index = order.indexOf(getIconId(icon, iconSet));
+      return index === -1 ? Infinity : index;
+    };
+    return [...iconSet].sort((a, b) => (position(a) - position(b)) || a.text.localeCompare(b.text));
+}
 
 function getFilteredIcons(iconSet, searchText = '') {
     const query = searchText.trim().toLowerCase();
-    const sortedIcons = [...iconSet].sort((a, b) => a.text.localeCompare(b.text));
+    const sortedIcons = sortIcons(iconSet)
+      .filter(icon => !hiddenIcons.has(getIconId(icon, iconSet)));
 
     if (!query) {
       return sortedIcons;
@@ -419,7 +506,7 @@ function showAppsPage(searchText = '') { // Show apps HTML
 
     filteredIcons.forEach(icon => {
       const iconHTML = `
-      <a href="${icon.link}" target="_blank" class="app-icon">
+      <a href="${icon.link}" target="_blank" class="app-icon" data-icon-id="${getIconId(icon, appIcons)}">
         <div class="icon-item">
           <img src="${icon.image}" alt="${icon.text}" class="h-auto max-w-[35px]">
           <p class="mt-2 line-clamp-2 text-[11px] font-medium text-slate-700 dark:text-slate-200">${icon.text}</p>
@@ -446,7 +533,7 @@ function showAppsPage(searchText = '') { // Show apps HTML
 
     filteredIcons.forEach(icon => {
       const iconHTML = `
-      <a href="${icon.link}" target="_blank" class="app-icon">
+      <a href="${icon.link}" target="_blank" class="app-icon" data-icon-id="${getIconId(icon, adminIcons)}">
         <div class="icon-item">
           <img src="${icon.image}" alt="${icon.text}" class="h-auto max-w-[35px]">
           <p class="mt-2 line-clamp-2 text-[11px] font-medium text-slate-700 dark:text-slate-200">${icon.text}</p>
@@ -761,21 +848,59 @@ function showSettingsModal() {
     const themeSelect = document.getElementById('theme');
     const tabModeSelect = document.getElementById('tab-mode');
     const debugModeToggle = document.getElementById('debug-mode');
+    const iconVisibilityList = document.getElementById('icon-visibility-list');
+    const resetIconOrder = document.getElementById('reset-icon-order');
 
     const DEFAULT_SETTINGS = {
       theme: 'system',
       debugMode: false,
-      tabMode: 'individual'
+      tabMode: 'individual',
+      hiddenIcons: [],
+      iconOrder: []
     };
+
+    // Build a checkbox per icon in the saved order; checked = visible. Uses textContent so names are never parsed as HTML.
+    const renderIconVisibilityList = (hidden, order) => {
+      iconVisibilityList.innerHTML = '';
+      [['Apps', appIcons], ['Admin', adminIcons]].forEach(([heading, iconSet]) => {
+        const title = document.createElement('p');
+        title.className = 'mt-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400';
+        title.textContent = heading;
+        iconVisibilityList.appendChild(title);
+
+        sortIcons(iconSet, order).forEach(icon => {
+          const label = document.createElement('label');
+          label.className = 'flex items-center gap-2 py-1 text-sm text-slate-700 dark:text-slate-200';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 dark:border-slate-600 dark:bg-slate-900 dark:focus:ring-sky-400';
+          checkbox.dataset.iconId = getIconId(icon, iconSet);
+          checkbox.checked = !hidden.has(checkbox.dataset.iconId);
+          const name = document.createElement('span');
+          name.textContent = icon.text;
+          label.append(checkbox, name);
+          iconVisibilityList.appendChild(label);
+        });
+      });
+    };
+
+    const getListCheckboxes = () => [...iconVisibilityList.querySelectorAll('input[type="checkbox"]')];
 
     const loadSettings = () => {
       chrome.storage.sync.get(DEFAULT_SETTINGS, data => {
         themeSelect.value = data.theme;
         tabModeSelect.value = data.tabMode;
         debugModeToggle.checked = data.debugMode;
+        renderIconVisibilityList(new Set(data.hiddenIcons), data.iconOrder);
         applyTheme(data.theme);
       });
     };
+
+    // Reset to A-Z, keeping the current (unsaved) visibility ticks
+    resetIconOrder.addEventListener('click', () => {
+      const hidden = new Set(getListCheckboxes().filter(checkbox => !checkbox.checked).map(checkbox => checkbox.dataset.iconId));
+      renderIconVisibilityList(hidden, []);
+    });
 
     settingsIcon.addEventListener('click', () => {
       loadSettings();
@@ -792,9 +917,16 @@ function showSettingsModal() {
       else {
         console.log("🛠 Debug mode disabled");
       }
-        chrome.storage.sync.set({ theme, debugMode, tabMode }, () => {
-            console.log("✅ Settings saved:", { theme, debugMode, tabMode });
+      const hiddenIconIds = getListCheckboxes()
+        .filter(checkbox => !checkbox.checked)
+        .map(checkbox => checkbox.dataset.iconId);
+      const iconOrderIds = getListCheckboxes().map(checkbox => checkbox.dataset.iconId); // DOM order = user's order
+        chrome.storage.sync.set({ theme, debugMode, tabMode, hiddenIcons: hiddenIconIds, iconOrder: iconOrderIds }, () => {
+            console.log("✅ Settings saved:", { theme, debugMode, tabMode, hiddenIcons: hiddenIconIds, iconOrder: iconOrderIds });
             applyTheme(theme); // Apply theme immediately
+            hiddenIcons = new Set(hiddenIconIds);
+            iconOrder = iconOrderIds;
+            renderFilteredPages(); // Apply icon visibility and order immediately
             settingsModal.closeModal();
         });
     });
